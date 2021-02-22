@@ -1,6 +1,7 @@
 package com.jkk.taskpublish;
 
 import com.jkk.Task;
+import com.jkk.taskpublish.entity.NodeTask;
 import junit.framework.TestCase;
 
 import java.util.HashMap;
@@ -258,9 +259,7 @@ public class FairAndCanReUsingReBalanceRuleTest extends TestCase {
 		System.out.println();
 	}
 
-	//jar-1  jar-2  jar-2  jar-1  jar-1  jar-2  jar-3  jar-3
-	//jar-3  jar-2  jar-1  jar-1  jar-1  jar-2  jar-3  jar-3    1->2->1->3
-	// 存在优化点, 将第三个 "jar-2" 变 "jar-3" 会更快
+	//jar-1  jar-2  jar-3  jar-1  jar-1  jar-2  jar-3  jar-3
 	public void testFinishTask3() {
 		int nodeNum = 8;
 
@@ -289,7 +288,8 @@ public class FairAndCanReUsingReBalanceRuleTest extends TestCase {
 		// 3号节点执行过jar-1, jar-4
 		processedTask.get("3").add(createTask(null, "jar-1", null));
 		processedTask.get("3").add(createTask(null, "jar-4", null));
-
+		//6号节点执行过jar-3
+		processedTask.get("6").add(createTask(null, "jar-3", "topic-3"));
 		ReBalanceRule reBalanceRule = new FairAndCanReUsingReBalanceRule();
 
 		Map<String, Task> map = reBalanceRule.finishTask(processingTask, processedTask);

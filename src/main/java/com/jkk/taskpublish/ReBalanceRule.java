@@ -1,6 +1,7 @@
 package com.jkk.taskpublish;
 
 import com.jkk.Task;
+import com.jkk.taskpublish.entity.NodeTask;
 
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;

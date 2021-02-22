@@ -1,6 +1,9 @@
 package com.jkk.taskpublish;
 
 import com.jkk.Task;
+import com.jkk.taskpublish.entity.NodeTask;
+import com.jkk.taskpublish.entity.TaskNodes;
+import com.jkk.taskpublish.exception.OutOfResourcesException;
 
 import java.util.*;
 import java.util.concurrent.BlockingQueue;
@@ -66,7 +69,7 @@ public class FairAndCanReUsingReBalanceRule implements ReBalanceRule {
 	 * @param processedTask
 	 * @return
 	 */
-	private TaskNodes getFreeTaskNodes(Task task, Set<String> freeNodes, Map<String, BlockingQueue<Task>> processedTask) {
+	private TaskNodes getFreeTaskNodes(Task task, List<String> freeNodes, Map<String, BlockingQueue<Task>> processedTask) {
 		TaskNodes newTaskNodes = new TaskNodes(task);
 		filterProcessed(task, processedTask).stream().filter(freeNodes::contains).forEach(newTaskNodes::addNodes);
 		return newTaskNodes;
@@ -81,56 +84,76 @@ public class FairAndCanReUsingReBalanceRule implements ReBalanceRule {
 	public Map<String, Task> finishTask(Map<String, Task> processingTask, Map<String, BlockingQueue<Task>> processedTask) {
 		Map<String, Task> result = new HashMap<>();
 
-		Set<String> freeNodes = new HashSet<>(filterFreeNode(processingTask));
+		List<String> freeNodes = filterFreeNode(processingTask);
 
-		Map<Task, TaskNodes> newTaskNodesCache = new HashMap<>(); // 任务执行过的节点 存在空闲节点中的
-		List<TaskNodes> taskNodesList = processingTask2TaskNodeList(processingTask);
-		for (TaskNodes taskNodes : taskNodesList) {
-			newTaskNodesCache.put(taskNodes.getTask(), getFreeTaskNodes(taskNodes.getTask(), freeNodes, processedTask));
+		Map<Task, TaskNodes> processingTaskNodesInFreeNodeCache = new HashMap<>(); // 任务执行过的节点 存在空闲节点中的
+		List<TaskNodes> processingTaskNodesList = processingTask2TaskNodeList(processingTask);
+		for (TaskNodes taskNodes : processingTaskNodesList) {
+			processingTaskNodesInFreeNodeCache.put(taskNodes.getTask(), getFreeTaskNodes(taskNodes.getTask(), freeNodes, processedTask));
 		}
 
-		PriorityQueue<TaskNodes> priorityQueue = new PriorityQueue<>((o1, o2) -> {
+		PriorityQueue<TaskNodes> taskDistributePriorityQueue = new PriorityQueue<>((o1, o2) -> {
 			int cmp = o1.getNodes().size() - o2.getNodes().size();
 			if (cmp != 0) {
 				return cmp;
 			}else {
-				// 正在执行节点个数相等下 优先考虑执行过该任务的空闲节点中多的
-				int inFreeNodes1 = newTaskNodesCache.get(o1.getTask()).getNodes().size();
-				int inFreeNodes2 = newTaskNodesCache.get(o2.getTask()).getNodes().size();
+				// 正在执行节点个数相等下 优先考虑执行过该任务的空闲节点多的
+				int inFreeNodes1 = processingTaskNodesInFreeNodeCache.get(o1.getTask()).getNodes().size();
+				int inFreeNodes2 = processingTaskNodesInFreeNodeCache.get(o2.getTask()).getNodes().size();
 				return inFreeNodes2 - inFreeNodes1;
 			}
-		}); // 从运行任务节少的开始
-		priorityQueue.addAll(taskNodesList);
+		}); // 优先出列: 运行任务节少的, 执行过该任务空闲节点多的
+		taskDistributePriorityQueue.addAll(processingTaskNodesList);
 
-		List<TaskNodes> newTaskNodesList = new ArrayList<>(); // 需要分配的任务 对应的执行过的 在freeNodes中的节点 可能存在多个相同的任务
+		Map<TaskNodes, Integer> newTaskNodesAndNumMap = new HashMap<>(); // 需要分配的任务 对应的执行过的 在freeNodes中的节点 以及数量
+		Map<String, Integer> freeNodeWantGetTaskNum = new HashMap<>(); // 空闲节点想要接受当前任务的个数
 		for (int i = 0; i < freeNodes.size(); ++i) {
-			TaskNodes taskNodes = priorityQueue.poll();
+			TaskNodes taskNodes = taskDistributePriorityQueue.poll();
 			taskNodes.addNodes("ohhhhhhhh"); // 添加的虚拟节点, 方便改变优先队列顺序, 它的值对结果没有任何影响
 
-			newTaskNodesList.add(newTaskNodesCache.get(taskNodes.getTask()));
-			priorityQueue.add(taskNodes);
-		}
+			TaskNodes newTaskNode = processingTaskNodesInFreeNodeCache.get(taskNodes.getTask());
+			newTaskNodesAndNumMap.put(newTaskNode, newTaskNodesAndNumMap.getOrDefault(newTaskNode,0) + 1);
+			taskDistributePriorityQueue.add(taskNodes);
 
-		newTaskNodesList.sort(Comparator.comparingInt(o -> o.getNodes().size())); // 从少到多分配
-		boolean[] isNewTaskNodesDistribute = new boolean[newTaskNodesList.size()];
-		for (int i = 0; i < newTaskNodesList.size(); ++i) {
-			for (String clientId : newTaskNodesList.get(i).getNodes()) {
-				if (freeNodes.contains(clientId)) {
-					freeNodes.remove(clientId);
-					result.put(clientId, newTaskNodesList.get(i).getTask());
-					isNewTaskNodesDistribute[i] = true;
+			freeNodeWantGetTaskNum.put(freeNodes.get(i), 0);
+		}
+		newTaskNodesAndNumMap.forEach((taskNodes, num) ->
+				taskNodes.getNodes().forEach(clientId ->
+						freeNodeWantGetTaskNum.put(clientId, freeNodeWantGetTaskNum.get(clientId) + num)));
+
+		PriorityQueue<Map.Entry<TaskNodes, Integer>> resultDistributePriorityQueue =
+				new PriorityQueue<>(Comparator.comparingInt(o -> o.getKey().getNodes().size()));
+		resultDistributePriorityQueue.addAll(newTaskNodesAndNumMap.entrySet());
+		while (! resultDistributePriorityQueue.isEmpty()) {
+			Map.Entry<TaskNodes, Integer> distributeTaskNodesAndNum = resultDistributePriorityQueue.poll();
+			int num = distributeTaskNodesAndNum.getValue();
+			while (num-- != 0) {
+				Optional<String> clientId = distributeTaskNodesAndNum.getKey().getNodes().stream()
+						.filter(freeNodes::contains)
+						.min(Comparator.comparingInt(freeNodeWantGetTaskNum::get));
+				if (clientId.isPresent()) {
+					freeNodes.remove(clientId.get());
+					result.put(clientId.get(), distributeTaskNodesAndNum.getKey().getTask());
+				}else {
+					num++;
 					break;
 				}
+			}
+			if (num == -1) {
+				newTaskNodesAndNumMap.remove(distributeTaskNodesAndNum.getKey());
+			}else {
+				newTaskNodesAndNumMap.put(distributeTaskNodesAndNum.getKey(), num);
 			}
 		}
 
 		// 分配不存在可重用任务的节点
-		for (int i = 0; i < isNewTaskNodesDistribute.length; ++i) {
-			if (! isNewTaskNodesDistribute[i]) {
-				// get() 一定会存在, 不然前面的白写了
-				result.put(freeNodes.stream().findFirst().get(), newTaskNodesList.get(i).getTask());
+		newTaskNodesAndNumMap.forEach((taskNode, num) -> {
+			while (num-- != 0) {
+				String removeClientId = freeNodes.get(0);
+				result.put(removeClientId, taskNode.getTask());
+				freeNodes.remove(removeClientId);
 			}
-		}
+		});
 
 		return result;
 	}

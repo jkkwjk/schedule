@@ -1,4 +1,4 @@
-package com.jkk.taskpublish;
+package com.jkk.taskpublish.entity;
 
 
 import com.jkk.Task;
