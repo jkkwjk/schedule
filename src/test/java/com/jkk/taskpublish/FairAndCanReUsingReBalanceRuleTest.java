@@ -4,6 +4,7 @@ import com.jkk.Task;
 import com.jkk.taskpublish.entity.NodeTask;
 import junit.framework.TestCase;
 
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -526,4 +527,13 @@ public class FairAndCanReUsingReBalanceRuleTest extends TestCase {
 		return task;
 	}
 
+	public void test() {
+		BlockingQueue<String> blockingQueue = new ArrayBlockingQueue<String>(20);
+		blockingQueue.add("2");
+		blockingQueue.add("3");
+		blockingQueue.add("4");
+		blockingQueue.poll();
+		blockingQueue.add("5");
+		System.out.println(Arrays.toString(blockingQueue.toArray()));
+	}
 }

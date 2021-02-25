@@ -2,6 +2,7 @@ package com.jkk.taskpublish;
 
 import com.jkk.Task;
 import com.jkk.taskpublish.entity.NodeTask;
+import com.jkk.taskpublish.exception.OutOfResourcesException;
 
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;

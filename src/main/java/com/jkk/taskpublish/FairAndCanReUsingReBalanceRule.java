@@ -7,6 +7,7 @@ import com.jkk.taskpublish.exception.OutOfResourcesException;
 
 import java.util.*;
 import java.util.concurrent.BlockingQueue;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
@@ -34,7 +35,8 @@ public class FairAndCanReUsingReBalanceRule implements ReBalanceRule {
 
 		// 按照均衡策略 应当分配 总结点数/任务总数 给他
 		int nodeNum = processingTask.size();
-		int taskNum = new HashSet<>(processingTask.values()).size() + 1;
+		int taskNum = (int) new HashSet<>(processingTask.values()).stream()
+				.filter(o -> o.getProcessId() != null).count() + 1;
 		if (taskNum > nodeNum) {
 			throw new OutOfResourcesException(newTask);
 		}
@@ -88,6 +90,9 @@ public class FairAndCanReUsingReBalanceRule implements ReBalanceRule {
 
 		Map<Task, TaskNodes> processingTaskNodesInFreeNodeCache = new HashMap<>(); // 任务执行过的节点 存在空闲节点中的
 		List<TaskNodes> processingTaskNodesList = processingTask2TaskNodeList(processingTask);
+		if (processingTaskNodesList.size() == 0) { // 没有任何正在执行的任务
+			return result;
+		}
 		for (TaskNodes taskNodes : processingTaskNodesList) {
 			processingTaskNodesInFreeNodeCache.put(taskNodes.getTask(), getFreeTaskNodes(taskNodes.getTask(), freeNodes, processedTask));
 		}
@@ -128,12 +133,15 @@ public class FairAndCanReUsingReBalanceRule implements ReBalanceRule {
 			Map.Entry<TaskNodes, Integer> distributeTaskNodesAndNum = resultDistributePriorityQueue.poll();
 			int num = distributeTaskNodesAndNum.getValue();
 			while (num-- != 0) {
-				Optional<String> clientId = distributeTaskNodesAndNum.getKey().getNodes().stream()
+				Optional<String> clientIdOptional = distributeTaskNodesAndNum.getKey().getNodes().stream()
 						.filter(freeNodes::contains)
 						.min(Comparator.comparingInt(freeNodeWantGetTaskNum::get));
-				if (clientId.isPresent()) {
-					freeNodes.remove(clientId.get());
-					result.put(clientId.get(), distributeTaskNodesAndNum.getKey().getTask());
+				if (clientIdOptional.isPresent()) {
+					String clientId = clientIdOptional.get();
+
+					freeNodes.remove(clientId);
+					freeNodeWantGetTaskNum.put(clientId, freeNodeWantGetTaskNum.get(clientId) - 1);
+					result.put(clientId, distributeTaskNodesAndNum.getKey().getTask());
 				}else {
 					num++;
 					break;
@@ -182,7 +190,8 @@ public class FairAndCanReUsingReBalanceRule implements ReBalanceRule {
 
 			// 没有节点执行这个任务了
 			if (! taskNodesList.contains(new TaskNodes(runningTask))) {
-				TaskNodes maxRunTaskNodes = taskNodesList.stream().max(Comparator.comparingInt(o -> o.getNodes().size())).get();
+				TaskNodes maxRunTaskNodes = taskNodesList.stream().max(Comparator.comparingInt(o -> o.getNodes().size()))
+						.orElseThrow(() -> new OutOfResourcesException(runningTask));
 				if (maxRunTaskNodes.getNodes().size() <= 1) {
 					throw new OutOfResourcesException(runningTask);
 				}

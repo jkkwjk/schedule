@@ -64,7 +64,7 @@ public class TaskResolver {
 					log.info("节点创建成功");
 
 					if (isFirstStart.get()) {
-						nodeCache.start(true);
+						nodeCache.start(false); // 监听建立时间比任务发布时间晚的话会错过任务
 						isFirstStart.set(false);
 					}
 
